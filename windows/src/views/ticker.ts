@@ -38,7 +38,7 @@ function makeRow(): Row {
   const shimmer = h("span", { class: "tick-text shimmer" });
   const dim = h("span", {
     class: "tick-text",
-    style: "position:absolute;left:0;right:0;color:#6b7079",
+    style: "position:absolute;top:0;left:0;right:0;color:#6b7079",
   });
   const el = h(
     "div",
@@ -123,6 +123,13 @@ export class Ticker {
     this.displayIndex = idx;
     if (this.queue.length > MAX_QUEUE) {
       this.queue = this.queue.slice(-MAX_QUEUE);
+    }
+    // At rest the rows show the steps as they are. Without this, a session's
+    // first step never appeared: it replaced the "…" placeholder at the same
+    // index, so nothing was queued and the row kept the placeholder.
+    if (!this.animating) {
+      setText(this.a, idx > 0 ? steps[idx - 1] : "…");
+      setText(this.b, steps[Math.max(idx, 0)]);
     }
   }
 
