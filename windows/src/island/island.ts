@@ -113,7 +113,7 @@ export class Island {
       },
       openTerminal: () => {
         const cwd = State.focusTask?.sessionCwd ?? null;
-        void Bridge.openInVSCode(cwd);
+        void Bridge.openTerminal(cwd);
       },
       // The ↗ button — same targets as openAgentTarget() on macOS.
       openTarget: () => {
@@ -127,7 +127,7 @@ export class Island {
           integration_notion: "https://notion.so",
           integration_calcom: "https://app.cal.com/bookings",
         };
-        if (task.id === "integration_claude") void Bridge.openInVSCode(task.sessionCwd ?? null);
+        if (task.id === "integration_claude") void Bridge.openTerminal(task.sessionCwd ?? null);
         else if (task.id === "integration_n8n") void Bridge.openN8n();
         else if (urls[task.id]) void Bridge.openUrl(urls[task.id]);
       },
@@ -225,6 +225,7 @@ export class Island {
 
   private wireFsm() {
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
+    this.fsm.openOnHover = State.settings.openOnHover;
     this.fsm.onTransition = (from, to) => {
       switch (to) {
         case "hidden":
@@ -528,7 +529,10 @@ export class Island {
     // The wake strip is the only thing the OS can hit while the island is hidden.
     this.wakeStrip.addEventListener("mouseenter", () => {
       Sound.resume();
-      if (State.mode === "hidden") this.fsm.mouseEntered();
+      if (State.mode !== "hidden") return;
+      // The strip is under the pointer, so the pointer is in: see onCursor.
+      this.wasInIsland = true;
+      this.fsm.mouseEntered();
     });
 
     this.islandEl.addEventListener("mousedown", (e) => {
@@ -585,18 +589,24 @@ export class Island {
       x >= rect.x - HIT_MARGIN && x <= rect.x + rect.w + HIT_MARGIN &&
       y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
 
-    if (inIsland && !this.wasInIsland) {
+    // Recorded before the state machine hears about it: a transition it makes on
+    // entry asks whether the pointer is inside, and "not yet" would close an
+    // island that hover has just opened.
+    const entered = inIsland && !this.wasInIsland;
+    const left = !inIsland && this.wasInIsland;
+    this.wasInIsland = inIsland;
+
+    if (entered) {
       if (this.fsm.state === "coucou") this.greeting.hover();
       this.fsm.mouseEntered();
       this.homeCollapseAt = null;
     }
-    if (!inIsland && this.wasInIsland) {
+    if (left) {
       this.fsm.mouseLeft();
       if (this.fsm.state === "home" && !State.isPinned) {
         this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
       }
     }
-    this.wasInIsland = inIsland;
 
     // Bot hover → love
     const overBot = State.mode === "expanded" && State.stateOverride == null && this.isBotHit(x, y);
@@ -885,6 +895,7 @@ export class Island {
     Sound.setEnabled(State.settings.soundEnabled);
     Sound.setVolume(State.settings.soundVolume);
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
+    this.fsm.openOnHover = State.settings.openOnHover;
     State.notify();
   }
 

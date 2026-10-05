@@ -130,6 +130,15 @@ pub fn open_url(url: &str) {
     let _ = Command::new("xdg-open").arg(url).spawn();
 }
 
+/// The distribution's default terminal, started in `dir`.
+pub fn open_terminal(dir: Option<&std::path::Path>) {
+    let mut terminal = Command::new("x-terminal-emulator");
+    if let Some(dir) = dir {
+        terminal.current_dir(dir);
+    }
+    let _ = terminal.spawn();
+}
+
 pub fn reveal_folder(path: &str) {
     let _ = Command::new("xdg-open").arg(path).spawn();
 }

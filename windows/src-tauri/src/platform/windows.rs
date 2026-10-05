@@ -81,6 +81,24 @@ pub fn open_url(url: &str) {
         .spawn();
 }
 
+/// Windows Terminal when it is installed, PowerShell otherwise, started in `dir`.
+pub fn open_terminal(dir: Option<&std::path::Path>) {
+    let mut terminal = Command::new("wt.exe");
+    if let Some(dir) = dir {
+        terminal.arg("-d").arg(dir).current_dir(dir);
+    }
+    if terminal.spawn().is_ok() {
+        return;
+    }
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    let mut shell = Command::new("powershell.exe");
+    shell.creation_flags(CREATE_NEW_CONSOLE);
+    if let Some(dir) = dir {
+        shell.current_dir(dir);
+    }
+    let _ = shell.spawn();
+}
+
 pub fn reveal_folder(path: &str) {
     let _ = Command::new("explorer").arg(path).spawn();
 }

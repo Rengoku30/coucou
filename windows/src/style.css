@@ -1420,3 +1420,38 @@ input[type="range"].ctl-volume {
   flex: 1 1 auto;
   width: auto;
 }
+
+/* ── Session details (overview, right card, when there are no other pills) ─ */
+
+.session {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.session-prompt {
+  font: 400 12.5px/1.35 var(--font);
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.session-line {
+  font: 400 11.5px var(--font);
+  color: var(--dim-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-line:empty {
+  display: none;
+}

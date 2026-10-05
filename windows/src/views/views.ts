@@ -131,7 +131,26 @@ function buildOverview(actions: ViewActions): ViewHost {
   );
   const left = card(null, leftBody, jump);
   const pills = h("div", { class: "pills" });
-  const right = card(null, pills);
+  // With no other pill to switch to, the right card describes the session instead.
+  const sessionPrompt = h("div", { class: "session-prompt" });
+  const sessionStats = h("div", { class: "session-line" });
+  const sessionFiles = h("div", { class: "session-line" });
+  const session = h("div", { class: "session" }, sessionPrompt, sessionStats, sessionFiles);
+  const right = card(null, pills, session);
+
+  function syncSession(nowMs: number) {
+    const task = State.focusTask;
+    const started = task?.turnStartedAt ?? null;
+    const prompt = task?.prompt ?? (started != null ? "Session in progress" : "No session yet");
+    const steps = task?.toolCount ?? 0;
+    const stats = started == null
+      ? ""
+      : `${formatElapsed((task?.turnEndedAt ?? nowMs) - started)} · ${steps} ${steps === 1 ? "step" : "steps"}`;
+    const files = formatFiles(task?.changedFiles ?? []);
+    if (sessionPrompt.textContent !== prompt) sessionPrompt.textContent = prompt;
+    if (sessionStats.textContent !== stats) sessionStats.textContent = stats;
+    if (sessionFiles.textContent !== files) sessionFiles.textContent = files;
+  }
 
   const el = h("div", { class: "view overview" },
     h("div", { class: "left" }, left),
@@ -165,6 +184,7 @@ function buildOverview(actions: ViewActions): ViewHost {
     el,
     tick(nowMs: number) {
       if (mode === "ticker") ticker.tick(nowMs);
+      if (session.style.display !== "none") syncSession(nowMs);
     },
     sync() {
       const task = State.focusTask;
@@ -225,8 +245,35 @@ function buildOverview(actions: ViewActions): ViewHost {
         for (const t of others) pills.append(buildPill(t, actions));
         pruneMiniBots();
       }
+      pills.style.display = others.length > 0 ? "" : "none";
+      session.style.display = others.length > 0 ? "none" : "";
+      syncSession(performance.now());
     },
   };
+}
+
+/** "42s", "2m 14s", "1h 05m". */
+export function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+}
+
+/** "3 files · views.ts, hooks.ts +1" — the two latest by name, the rest counted. */
+export function formatFiles(files: string[]): string {
+  if (files.length === 0) return "";
+  const shown = files.slice(-2).reverse().join(", ");
+  const more = files.length > 2 ? ` +${files.length - 2}` : "";
+  return `${files.length} ${files.length === 1 ? "file" : "files"} · ${shown}${more}`;
+}
+
+// The front end has no test runner, so the two formatters check themselves in dev.
+if (import.meta.env.DEV) {
+  console.assert(formatElapsed(42_000) === "42s" && formatElapsed(134_000) === "2m 14s");
+  console.assert(formatElapsed(3_900_000) === "1h 05m" && formatElapsed(-5) === "0s");
+  console.assert(formatFiles([]) === "" && formatFiles(["a.ts"]) === "1 file · a.ts");
+  console.assert(formatFiles(["a.ts", "b.ts", "c.ts"]) === "3 files · c.ts, b.ts +1");
 }
 
 function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {

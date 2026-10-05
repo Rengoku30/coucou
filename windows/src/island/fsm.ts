@@ -16,6 +16,8 @@ export class IslandStateMachine {
   greetAutoCollapseDelay = 0.6;
   /** coucou → petit while the mouse hovers the greeting. */
   greetHoverCollapseDelay = 10;
+  /** Hovering opens the island fully, without a click. */
+  openOnHover = false;
   /** An alert waiting for an answer stays open, even when the mouse leaves. */
   pinned = false;
 
@@ -34,10 +36,15 @@ export class IslandStateMachine {
     switch (this.state) {
       case "hidden":
         this.cancelTimers();
-        this.transition("petit");
+        this.transition(this.openOnHover ? "home" : "petit");
         break;
       case "petit":
-        this.clear("petitHide");
+        if (this.openOnHover) {
+          this.cancelTimers();
+          this.transition("home");
+        } else {
+          this.clear("petitHide");
+        }
         break;
       case "home":
         this.clear("homeCollapse");

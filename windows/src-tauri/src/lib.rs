@@ -165,6 +165,19 @@ fn open_in_vscode(path: Option<String>) -> bool {
     false
 }
 
+/// The ↗ button on the Claude Code pill: a terminal in the session's folder.
+#[tauri::command]
+fn open_terminal(path: Option<String>) {
+    // Same rule as open_in_vscode: the path arrives in a hook payload, so only an
+    // existing folder given by its full path is used. Anything else opens the
+    // terminal where it normally starts.
+    let dir = path
+        .as_deref()
+        .map(std::path::Path::new)
+        .filter(|p| p.is_absolute() && p.is_dir());
+    platform::open_terminal(dir);
+}
+
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
@@ -429,6 +442,7 @@ pub fn run() {
             reposition,
             open_url,
             open_in_vscode,
+            open_terminal,
             quit_app,
             hooks_status,
             hooks_preview,

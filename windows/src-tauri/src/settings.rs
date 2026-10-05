@@ -20,6 +20,9 @@ pub struct Settings {
     /// Defaulted explicitly so a settings.json written by an older build still loads.
     #[serde(default = "default_model")]
     pub model: String,
+    /// Hovering the top of the screen opens the island fully, without a click.
+    #[serde(default)]
+    pub open_on_hover: bool,
 }
 
 fn default_model() -> String {
@@ -43,6 +46,7 @@ impl Default for Settings {
             autostart: false,
             hooks_installed: false,
             model: default_model(),
+            open_on_hover: false,
         }
     }
 }

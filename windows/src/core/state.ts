@@ -19,6 +19,15 @@ export interface AgentTask {
   miniEye?: EyeShape | null;
   pillBadge?: PillBadge | null;
   sessionCwd?: string | null;
+  /** First line of what the user last asked this session. */
+  prompt?: string | null;
+  /** performance.now() when the current turn started, and when it stopped. */
+  turnStartedAt?: number | null;
+  turnEndedAt?: number | null;
+  /** Tool calls made this turn. */
+  toolCount?: number;
+  /** Names of the files edited or written this turn, in order, no repeats. */
+  changedFiles?: string[];
 }
 
 export interface ApprovalInfo {
@@ -92,6 +101,8 @@ export interface Settings {
   hooksInstalled: boolean;
   /** Claude model used by the chat. */
   model: string;
+  /** Hovering the top of the screen opens the island fully, without a click. */
+  openOnHover: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -106,6 +117,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autostart: false,
   hooksInstalled: false,
   model: "claude-opus-5",
+  openOnHover: false,
 };
 
 type Listener = () => void;

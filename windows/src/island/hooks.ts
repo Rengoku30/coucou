@@ -60,36 +60,65 @@ function lastPathComponent(p: string): string {
   return idx >= 0 ? cleaned.slice(idx + 1) : cleaned;
 }
 
-/** frenchStep() — same labels as the macOS app. */
+/** What each tool is doing, in a word. An unknown tool shows its own name. */
 const TOOL_LABELS: Record<string, string> = {
-  Bash: "Exécute",
-  Read: "Lit",
-  Write: "Écrit",
-  Edit: "Modifie",
-  Glob: "Cherche",
-  Grep: "Recherche",
-  WebSearch: "Recherche web",
-  WebFetch: "Récupère",
-  TodoWrite: "Tâches",
+  Bash: "Run",
+  Read: "Read",
+  Write: "Write",
+  Edit: "Edit",
+  Glob: "Find",
+  Grep: "Search",
+  WebSearch: "Web search",
+  WebFetch: "Fetch",
+  TodoWrite: "Todos",
   Task: "Agent",
-  LS: "Liste",
-  MultiEdit: "Modifie",
+  Agent: "Agent",
+  LS: "List",
+  MultiEdit: "Edit",
   NotebookEdit: "Notebook",
-  PowerShell: "Exécute",
+  PowerShell: "Run",
 };
+
+/** The field that says what a tool call is about, most telling first. */
+const STEP_FIELDS = ["command", "file_path", "notebook_path", "path", "pattern", "query", "url", "description"] as const;
 
 function stepLabel(tool: string, input: Record<string, unknown>): string {
   const label = TOOL_LABELS[tool] ?? tool;
-  const str = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : null);
-  const cmd = str("command");
-  if (cmd) return `${label} · ${cmd.slice(0, 40)}`;
-  const path = str("path");
-  if (path) return `${label} · ${lastPathComponent(path)}`;
-  const file = str("file_path");
-  if (file) return `${label} · ${lastPathComponent(file)}`;
-  const query = str("query");
-  if (query) return `${label} · ${query.slice(0, 40)}`;
+  for (const field of STEP_FIELDS) {
+    const value = input[field];
+    if (typeof value !== "string" || !value.trim()) continue;
+    const isPath = field === "file_path" || field === "notebook_path" || field === "path";
+    return `${label} · ${isPath ? lastPathComponent(value) : value.trim().slice(0, 40)}`;
+  }
   return label;
+}
+
+/** Tools that change a file, for the session details. */
+const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+/** A new prompt starts a new turn: the clock, the step count and the file list start over. */
+function startTurn(id: string, prompt: string | null) {
+  const t = State.tasks.find((x) => x.id === id);
+  if (!t) return;
+  if (prompt) t.prompt = prompt.trim().split(/\r?\n/)[0].slice(0, 160);
+  t.turnStartedAt = performance.now();
+  t.turnEndedAt = null;
+  t.toolCount = 0;
+  t.changedFiles = [];
+}
+
+function countTool(id: string, tool: string, input: Record<string, unknown>) {
+  const t = State.tasks.find((x) => x.id === id);
+  if (!t) return;
+  // Coucou was started in the middle of a turn: count from the first thing it saw.
+  if (t.turnStartedAt == null || t.turnEndedAt != null) startTurn(id, null);
+  t.toolCount = (t.toolCount ?? 0) + 1;
+  const file = input.file_path ?? input.notebook_path;
+  if (EDIT_TOOLS.has(tool) && typeof file === "string" && file) {
+    const name = lastPathComponent(file);
+    t.changedFiles ??= [];
+    if (!t.changedFiles.includes(name)) t.changedFiles.push(name);
+  }
 }
 
 /**
@@ -134,6 +163,11 @@ function clearSession() {
   t.stepIndex = 0;
   t.name = "VS Code";
   t.pillBadge = null;
+  t.prompt = null;
+  t.turnStartedAt = null;
+  t.turnEndedAt = null;
+  t.toolCount = 0;
+  t.changedFiles = [];
 }
 
 export function registerHookHandlers(island: Island) {
@@ -194,6 +228,7 @@ function handleHook(island: Island, payload: HookPayload) {
       State.updateTask(agentId, "thinking");
       // The field is `prompt`; reading `message` meant this step was always blank.
       const asked = payload.prompt ?? payload.message;
+      startTurn(agentId, asked ?? null);
       if (asked) State.appendStep(agentId, asked.slice(0, 60));
       surface("overview", false);
       break;
@@ -203,6 +238,7 @@ function handleHook(island: Island, payload: HookPayload) {
       ensurePill();
       State.updateTask(agentId, "working");
       const tool = payload.tool_name ?? "Tool";
+      countTool(agentId, tool, payload.tool_input ?? {});
       State.appendStep(agentId, stepLabel(tool, payload.tool_input ?? {}));
       surface("overview", false);
       break;
@@ -230,7 +266,9 @@ function handleHook(island: Island, payload: HookPayload) {
       break;
     }
 
-    case "Stop":
+    case "Stop": {
+      const done = State.tasks.find((x) => x.id === agentId);
+      if (done && done.turnStartedAt != null) done.turnEndedAt = performance.now();
       State.updateTask(agentId, "finished");
       if (payload.message) State.appendStep(agentId, payload.message.slice(0, 60));
       Sound.play("finish");
@@ -245,6 +283,7 @@ function handleHook(island: Island, payload: HookPayload) {
         }
       }, 5200);
       break;
+    }
 
     case "StopFailure":
       State.updateTask(agentId, "error");
