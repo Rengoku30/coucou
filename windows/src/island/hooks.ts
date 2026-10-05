@@ -161,7 +161,7 @@ function clearSession() {
   if (!t) return;
   t.steps = [];
   t.stepIndex = 0;
-  t.name = "VS Code";
+  t.name = "Claude Code";
   t.pillBadge = null;
   t.prompt = null;
   t.turnStartedAt = null;
