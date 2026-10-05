@@ -5,7 +5,7 @@
 import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { Ticker } from "./ticker";
-import { State, type AgentTask } from "../core/state";
+import { State, isSessionTask, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
@@ -135,7 +135,10 @@ function buildOverview(actions: ViewActions): ViewHost {
   const sessionPrompt = h("div", { class: "session-prompt" });
   const sessionStats = h("div", { class: "session-line" });
   const sessionFiles = h("div", { class: "session-line" });
-  const session = h("div", { class: "session" }, sessionPrompt, sessionStats, sessionFiles);
+  // Other Claude Code sessions running right now, to switch to.
+  const chips = h("div", { class: "session-chips" });
+  const session = h("div", { class: "session" }, sessionPrompt, sessionStats, sessionFiles, chips);
+  let chipIds = "";
   const right = card(null, pills, session);
 
   function syncSession(nowMs: number) {
@@ -198,7 +201,9 @@ function buildOverview(actions: ViewActions): ViewHost {
       // VS Code with a live Claude Code session keeps the ticker; every other
       // pill shows its own card, exactly like IntegrationCardView.
       const sessionActive =
-        task?.id === "integration_claude" && (task.state !== "idle" || task.steps.length > 0);
+        task != null &&
+        (task.id.startsWith("session_") ||
+          (task.id === "integration_claude" && (task.state !== "idle" || task.steps.length > 0)));
 
       if (task && sessionActive) {
         if (mode !== "ticker") {
@@ -245,11 +250,41 @@ function buildOverview(actions: ViewActions): ViewHost {
         for (const t of others) pills.append(buildPill(t, actions));
         pruneMiniBots();
       }
-      pills.style.display = others.length > 0 ? "" : "none";
-      session.style.display = others.length > 0 ? "none" : "";
+      // Pills are for other agents and services. Other sessions are listed under
+      // the details instead, so the details never give way to them.
+      const showPills = others.some((t) => !isSessionTask(t));
+      pills.style.display = showPills ? "" : "none";
+      session.style.display = showPills ? "none" : "";
+      const chipKey = showPills ? "" : others.map((t) => `${t.id}:${t.name}:${t.state}`).join("|");
+      if (chipKey !== chipIds) {
+        chipIds = chipKey;
+        clear(chips);
+        if (!showPills) for (const t of others) chips.append(buildChip(t, actions));
+      }
       syncSession(performance.now());
     },
   };
+}
+
+/** What a session is doing, as the colour of its dot. Grey when idle. */
+const CHIP_COLORS: Record<string, string> = {
+  working: "#3B9EFF",
+  thinking: "#3B9EFF",
+  searching: "#3B9EFF",
+  approval: "#F5A524",
+  question: "#F5A524",
+  finished: "#22C55E",
+  error: "#F4505E",
+  ratelimit: "#F4505E",
+};
+
+function buildChip(task: AgentTask, actions: ViewActions): HTMLElement {
+  return h(
+    "button",
+    { class: "session-chip", title: `Show ${task.name}`, onclick: () => actions.setFocus(task.id) },
+    dot(CHIP_COLORS[task.state] ?? "#6B7079", 6),
+    h("span", { text: task.name }),
+  );
 }
 
 /** "42s", "2m 14s", "1h 05m". */

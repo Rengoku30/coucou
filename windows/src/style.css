@@ -1458,3 +1458,55 @@ input[type="range"].ctl-volume {
 .session-line:empty {
   display: none;
 }
+
+.session-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.session-chips:empty {
+  display: none;
+}
+
+.session-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 120px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #c5c8cd;
+  font: 400 11px var(--font);
+  cursor: default;
+}
+
+.session-chip:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+}
+
+.session-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Four rows have to fit the card: nothing may be squeezed, and with other
+   sessions listed the prompt keeps to one line. */
+.session > * {
+  flex: 0 0 auto;
+}
+
+.session:has(.session-chip) {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  gap: 4px;
+}
+
+.session:has(.session-chip) .session-prompt {
+  -webkit-line-clamp: 1;
+}

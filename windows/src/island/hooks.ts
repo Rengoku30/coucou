@@ -5,10 +5,54 @@
 
 import { Bridge, onEvent } from "../core/bridge";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, isSessionTask } from "../core/state";
 import type { Island } from "./island";
 
 const CLAUDE_ID = "integration_claude";
+
+/** A session silent for this long has gone without saying so; its pill is freed. */
+const STALE_MS = 30 * 60_000;
+
+/** Which pill each Claude Code session reports to, and when it last spoke. */
+const sessions = new Map<string, { taskId: string; lastEventAt: number }>();
+
+/**
+ * The pill for this session. The first live session uses the Claude Code pill;
+ * each further one running at the same time gets a pill of its own, so two
+ * sessions never write over each other's steps.
+ */
+function sessionTask(sessionId: string | undefined, projectName: string): string {
+  const now = performance.now();
+  for (const [id, s] of sessions) {
+    if (now - s.lastEventAt > STALE_MS) endSession(id);
+  }
+  if (!sessionId) return CLAUDE_ID;
+  const known = sessions.get(sessionId);
+  if (known) {
+    known.lastEventAt = now;
+    return known.taskId;
+  }
+  const primaryTaken = [...sessions.values()].some((s) => s.taskId === CLAUDE_ID);
+  const taskId = primaryTaken ? `session_${sessionId.slice(0, 8)}` : CLAUDE_ID;
+  if (primaryTaken) State.upsertSession(taskId, projectName);
+  sessions.set(sessionId, { taskId, lastEventAt: now });
+  return taskId;
+}
+
+function endSession(sessionId: string) {
+  const s = sessions.get(sessionId);
+  if (!s) return;
+  sessions.delete(sessionId);
+  if (s.taskId !== CLAUDE_ID) {
+    State.removeTask(s.taskId);
+    return;
+  }
+  State.updateTask(CLAUDE_ID, "idle");
+  clearSession();
+  // The view was on the session that just ended: move to one still running.
+  const running = State.tasks.find((t) => t.id.startsWith("session_"));
+  if (running && State.focusId === CLAUDE_ID) State.setFocus(running.id);
+}
 
 /** Clears the approval card if no decision was made before the hook gave up. */
 let pendingTimeout: number | null = null;
@@ -149,8 +193,8 @@ function approvalTarget(tool: string, input: Record<string, unknown>): string {
   return tool;
 }
 
-function upsert(projectName: string, cwd: string) {
-  const t = State.tasks.find((x) => x.id === CLAUDE_ID);
+function upsert(id: string, projectName: string, cwd: string) {
+  const t = State.tasks.find((x) => x.id === id);
   if (!t) return;
   t.name = projectName;
   if (cwd) t.sessionCwd = cwd;
@@ -191,7 +235,7 @@ function handleHook(island: Island, payload: HookPayload) {
   // Route to the right pill. Valid coucou_agent → dynamic "agent_<name>" pill.
   // "claude" is reserved; absent or invalid → Claude Code pill unchanged.
   const validAgent = validateAgent(payload.coucou_agent);
-  const agentId = validAgent ? `agent_${validAgent}` : CLAUDE_ID;
+  const agentId = validAgent ? `agent_${validAgent}` : sessionTask(payload.session_id, projectName);
   const isExternalAgent = validAgent !== null;
 
   const focused = State.focusId === agentId;
@@ -212,7 +256,7 @@ function handleHook(island: Island, payload: HookPayload) {
     if (isExternalAgent) {
       State.upsertExternalAgent(agentId, validAgent!, agentColor(validAgent!));
     } else {
-      upsert(projectName, cwd);
+      upsert(agentId, projectName, cwd);
     }
   };
 
@@ -295,6 +339,8 @@ function handleHook(island: Island, payload: HookPayload) {
     case "SessionEnd":
       if (isExternalAgent) {
         State.removeTask(agentId);
+      } else if (payload.session_id) {
+        endSession(payload.session_id);
       } else {
         State.updateTask(agentId, "idle");
         clearSession();
@@ -326,12 +372,13 @@ function handleHook(island: Island, payload: HookPayload) {
         if (requestId) void Bridge.approvalDecline(requestId);
         break;
       }
-      upsert(projectName, cwd);
+      upsert(agentId, projectName, cwd);
       if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       const tool = payload.tool_name ?? "Tool";
       const input = payload.tool_input ?? {};
       State.pendingApproval = {
         requestId,
+        taskId: agentId,
         sessionId: payload.session_id ?? "",
         tool,
         command: approvalTarget(tool, input),
@@ -339,16 +386,19 @@ function handleHook(island: Island, payload: HookPayload) {
       // The relay's short ack window closes in 800 ms; everything below this
       // line is synchronous, so the card really is up by the time it lands.
       if (requestId) void Bridge.approvalAck(requestId);
-      State.updateTask(CLAUDE_ID, "approval");
+      State.updateTask(agentId, "approval");
       State.isPinned = true;
       Sound.play("approval");
-      if (focused) {
+      if (focused || State.focusTask == null || isSessionTask(State.focusTask)) {
+        // Another session may be showing: the one that needs an answer takes the
+        // view, since the card is the only place it can be given.
+        State.setFocus(agentId);
         island.alert("approval");
       } else {
         // Another agent holds the view, so the card would yank it away. The badge
         // is the signal instead — but it has to be on screen for that to mean
         // anything, hence the reveal. We just told the relay a human can act.
-        State.setPillBadge(CLAUDE_ID, "approval");
+        State.setPillBadge(agentId, "approval");
         island.reveal();
       }
       // Coucou answers within 108 s or not at all; after that the terminal has
@@ -359,8 +409,8 @@ function handleHook(island: Island, payload: HookPayload) {
         State.pendingApproval = null;
         State.isPinned = false;
         island.dropPin();
-        State.updateTask(CLAUDE_ID, "working");
-        State.setPillBadge(CLAUDE_ID, null);
+        State.updateTask(agentId, "working");
+        State.setPillBadge(agentId, null);
         if (State.view === "approval") island.setView(State.defaultView());
         State.notify();
       }, 110_000);

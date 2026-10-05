@@ -32,6 +32,8 @@ export interface AgentTask {
 
 export interface ApprovalInfo {
   requestId: string;
+  /** The pill of the session that asked. */
+  taskId: string;
   sessionId: string;
   tool: string;
   command: string;
@@ -64,6 +66,11 @@ const task = (
 ): AgentTask => ({
   id, name, color, state: "idle", stepIndex: 0, steps: [], source, isIntegration: true,
 });
+
+/** The Claude Code pill, or the pill of a further session running beside it. */
+export function isSessionTask(task: AgentTask): boolean {
+  return task.id === "integration_claude" || task.id.startsWith("session_");
+}
 
 /** AgentTask.integrationAgents — same ids, names and colours as macOS. */
 export const INTEGRATION_AGENTS: AgentTask[] = [
@@ -259,6 +266,18 @@ class AppState {
       source: "agent", isIntegration: false,
     });
     if (!this.focusId) this.focusId = id;
+    this.notify();
+  }
+
+  /** A further Claude Code session running beside the first: a pill of its own, next to it. */
+  upsertSession(id: string, name: string) {
+    if (this.tasks.some((t) => t.id === id)) return;
+    const at = this.tasks.findIndex((t) => t.id === "integration_claude") + 1;
+    this.tasks.splice(at, 0, {
+      id, name, color: "#F5F6F8",
+      state: "idle", stepIndex: 0, steps: [],
+      source: "claudeCode", isIntegration: false,
+    });
     this.notify();
   }
 
