@@ -9,6 +9,7 @@ import { State, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
+import { buildControls } from "./controls";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 
@@ -81,6 +82,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, svg(ICONS.house, 13));
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
+  const tabControls = h("button", { class: "tab", title: "Controls", onclick: () => go("controls") }, svg(ICONS.note, 13));
 
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
@@ -93,7 +95,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabChat, tabDrop),
+    h("div", { class: "tabs" }, tabHome, tabChat, tabDrop, tabControls),
     h("div", { class: "header-actions" }, gearBtn, soundBtn),
   );
 
@@ -104,6 +106,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
+      tabControls.classList.toggle("on", v === "controls");
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
@@ -497,6 +500,7 @@ export function buildViews(
   map.set("confused", buildConfused());
   map.set("note", buildNote());
   map.set("settings", buildSettings(actions));
+  map.set("controls", buildControls());
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());

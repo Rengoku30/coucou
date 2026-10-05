@@ -97,9 +97,29 @@ export const Bridge = {
   /** Opens the configured n8n instance in the browser. */
   openN8n: () => call<void>("open_n8n"),
 
+  // ── System controls ───────────────────────────────────────────────────────
+  systemStatus: () => call<SystemStatus>("system_status"),
+  mediaCommand: (action: "toggle" | "next" | "previous") => call<void>("media_command", { action }),
+  /** 0 to 1, the system master volume. */
+  setVolume: (level: number) => call<void>("set_volume", { level }),
+  setOutputMuted: (muted: boolean) => call<void>("set_output_muted", { muted }),
+  setMicMuted: (muted: boolean) => call<void>("set_mic_muted", { muted }),
+  setLocation: (on: boolean) => call<void>("set_location", { on }),
+  openLocationSettings: () => call<void>("open_location_settings"),
+
   /** Tray → Pause. Stops the integration pollers, not just the island. */
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
 };
+
+/** What the Controls view shows. Mirrors `SystemStatus` in platform/mod.rs. */
+export interface SystemStatus {
+  supported: boolean;
+  media: { title: string; artist: string; playing: boolean } | null;
+  volume: number | null;
+  muted: boolean;
+  micMuted: boolean | null;
+  location: "on" | "off" | "systemOff";
+}
 
 export interface IntegrationUpdate {
   id: string;

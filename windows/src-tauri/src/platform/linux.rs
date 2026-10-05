@@ -134,6 +134,35 @@ pub fn reveal_folder(path: &str) {
     let _ = Command::new("xdg-open").arg(path).spawn();
 }
 
+// ── System controls ───────────────────────────────────────────────────────────
+// Not wired up on Linux yet: the Controls view says so.
+
+pub fn system_status() -> super::SystemStatus {
+    super::SystemStatus::default()
+}
+
+pub fn media_command(_action: &str) -> Result<(), String> {
+    Err("not supported on Linux".into())
+}
+
+pub fn set_volume(_level: f32) -> Result<(), String> {
+    Err("not supported on Linux".into())
+}
+
+pub fn set_output_muted(_muted: bool) -> Result<(), String> {
+    Err("not supported on Linux".into())
+}
+
+pub fn set_mic_muted(_muted: bool) -> Result<(), String> {
+    Err("not supported on Linux".into())
+}
+
+pub fn set_location(_on: bool) -> Result<(), String> {
+    Err("not supported on Linux".into())
+}
+
+pub fn open_location_settings() {}
+
 /// Our own `which`: the first executable file named `stem` on $PATH.
 pub fn find_on_path(stem: &str) -> Option<PathBuf> {
     let dirs = std::env::var_os("PATH")?;

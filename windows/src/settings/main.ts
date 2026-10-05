@@ -371,12 +371,13 @@ function generalSection(): HTMLElement {
   });
 
   const autoClose = h("input", {
-    type: "number", min: "5", max: "120", step: "1",
+    type: "number", min: "0", max: "120", step: "1",
     value: String(Math.round(settings.autoCloseInterval)),
     style: "width:72px",
   }) as HTMLInputElement;
   autoClose.addEventListener("change", () => {
-    settings.autoCloseInterval = Math.max(5, Math.min(120, Number(autoClose.value) || 15));
+    const typed = Number(autoClose.value);
+    settings.autoCloseInterval = autoClose.value.trim() === "" || Number.isNaN(typed) ? 15 : Math.max(0, Math.min(120, typed));
     autoClose.value = String(settings.autoCloseInterval);
     void save();
   });

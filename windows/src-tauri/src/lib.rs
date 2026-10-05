@@ -286,6 +286,52 @@ async fn refresh_integration(app: AppHandle, id: String) {
     integrations::poll_once(app, &id).await;
 }
 
+// ── System controls ───────────────────────────────────────────────────────────
+// `async` here only moves these short blocking OS calls off the main thread.
+
+#[tauri::command(async)]
+fn system_status() -> platform::SystemStatus {
+    platform::system_status()
+}
+
+/// Logs why a control did nothing, then hands the reason to the island.
+fn logged(what: &str, result: Result<(), String>) -> Result<(), String> {
+    if let Err(reason) = &result {
+        log::line(format!("controls: {what} failed: {reason}"));
+    }
+    result
+}
+
+#[tauri::command(async)]
+fn media_command(action: String) -> Result<(), String> {
+    logged("media", platform::media_command(&action))
+}
+
+#[tauri::command(async)]
+fn set_volume(level: f32) -> Result<(), String> {
+    logged("volume", platform::set_volume(level))
+}
+
+#[tauri::command(async)]
+fn set_output_muted(muted: bool) -> Result<(), String> {
+    logged("mute", platform::set_output_muted(muted))
+}
+
+#[tauri::command(async)]
+fn set_mic_muted(muted: bool) -> Result<(), String> {
+    logged("mic", platform::set_mic_muted(muted))
+}
+
+#[tauri::command(async)]
+fn set_location(on: bool) -> Result<(), String> {
+    logged("location", platform::set_location(on))
+}
+
+#[tauri::command]
+fn open_location_settings() {
+    platform::open_location_settings();
+}
+
 /// Lets the island write to the same log as the Rust side.
 #[tauri::command]
 fn log_line(message: String) {
@@ -401,6 +447,13 @@ pub fn run() {
             open_n8n,
             open_settings_window,
             set_paused,
+            system_status,
+            media_command,
+            set_volume,
+            set_output_muted,
+            set_mic_muted,
+            set_location,
+            open_location_settings,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

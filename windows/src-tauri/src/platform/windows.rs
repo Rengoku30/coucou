@@ -233,3 +233,213 @@ pub fn set_activating(win: &WebviewWindow, activating: bool) {
 
 /// Click-through here is the poll's WS_EX_TRANSPARENT toggle, not a region.
 pub fn set_input_region(_win: &WebviewWindow, _rect: Option<(f64, f64, f64, f64)>) {}
+
+// ── System controls ───────────────────────────────────────────────────────────
+// What the Controls view drives: the current media session (the one the Windows
+// volume flyout shows), the default speaker and microphone, and the per-user
+// location switch. Every call is short and blocking; lib.rs keeps them off the
+// main thread.
+
+use ::windows::core::{w, PCWSTR};
+use ::windows::Media::Control::{
+    GlobalSystemMediaTransportControlsSession as MediaSession,
+    GlobalSystemMediaTransportControlsSessionManager as MediaManager,
+    GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
+};
+use ::windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+use ::windows::Win32::Media::Audio::{
+    eCapture, eConsole, eRender, EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator,
+};
+use ::windows::Win32::System::Com::{CoCreateInstance, CoIncrementMTAUsage, CLSCTX_ALL};
+use ::windows::Win32::System::Registry::{
+    RegGetValueW, RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ,
+    RRF_RT_REG_SZ,
+};
+
+use super::{MediaInfo, SystemStatus};
+
+/// Where Windows keeps "let apps use my location": `Value` is "Allow" or "Deny".
+/// HKLM holds the switch for the whole PC (admin only), HKCU the user's own.
+const LOCATION_KEY: PCWSTR =
+    w!(r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location");
+
+/// Core Audio needs COM on the calling thread. Joining the multithreaded
+/// apartment once covers every thread that has not chosen one itself.
+fn ensure_com() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| unsafe {
+        let _ = CoIncrementMTAUsage();
+    });
+}
+
+fn err(e: ::windows::core::Error) -> String {
+    e.message()
+}
+
+fn media_session() -> ::windows::core::Result<MediaSession> {
+    MediaManager::RequestAsync()?.get()?.GetCurrentSession()
+}
+
+fn media_info() -> ::windows::core::Result<MediaInfo> {
+    let session = media_session()?;
+    let props = session.TryGetMediaPropertiesAsync()?.get()?;
+    Ok(MediaInfo {
+        title: props.Title()?.to_string(),
+        artist: props.Artist()?.to_string(),
+        playing: session.GetPlaybackInfo()?.PlaybackStatus()? == PlaybackStatus::Playing,
+    })
+}
+
+/// The volume control of the default speaker (`eRender`) or microphone (`eCapture`).
+fn endpoint(flow: EDataFlow) -> ::windows::core::Result<IAudioEndpointVolume> {
+    ensure_com();
+    unsafe {
+        let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        devices.GetDefaultAudioEndpoint(flow, eConsole)?.Activate(CLSCTX_ALL, None)
+    }
+}
+
+fn read_consent(root: HKEY) -> Option<String> {
+    let mut buf = [0u16; 32];
+    let mut bytes = std::mem::size_of_val(&buf) as u32;
+    let status = unsafe {
+        RegGetValueW(
+            root,
+            LOCATION_KEY,
+            w!("Value"),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+    };
+    if status.is_err() {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]))
+}
+
+/// The PC-wide switch wins: with it off, the user's own choice changes nothing.
+fn location_state(machine: Option<&str>, user: Option<&str>) -> &'static str {
+    match (machine, user) {
+        (Some("Deny"), _) => "systemOff",
+        (_, Some("Allow")) => "on",
+        _ => "off",
+    }
+}
+
+pub fn system_status() -> SystemStatus {
+    let speaker = endpoint(eRender).ok();
+    let mic = endpoint(eCapture).ok();
+    unsafe {
+        SystemStatus {
+            supported: true,
+            media: media_info().ok(),
+            volume: speaker.as_ref().and_then(|s| s.GetMasterVolumeLevelScalar().ok()),
+            muted: speaker.as_ref().and_then(|s| s.GetMute().ok()).is_some_and(|m| m.as_bool()),
+            mic_muted: mic.as_ref().and_then(|m| m.GetMute().ok()).map(|m| m.as_bool()),
+            location: location_state(
+                read_consent(HKEY_LOCAL_MACHINE).as_deref(),
+                read_consent(HKEY_CURRENT_USER).as_deref(),
+            ),
+        }
+    }
+}
+
+/// `action` is "toggle", "next" or "previous".
+pub fn media_command(action: &str) -> Result<(), String> {
+    let session = media_session().map_err(|_| "nothing is playing".to_string())?;
+    let sent = match action {
+        "toggle" => session.TryTogglePlayPauseAsync(),
+        "next" => session.TrySkipNextAsync(),
+        "previous" => session.TrySkipPreviousAsync(),
+        other => return Err(format!("unknown media action {other}")),
+    };
+    sent.and_then(|op| op.get()).map(|_| ()).map_err(err)
+}
+
+pub fn set_volume(level: f32) -> Result<(), String> {
+    let speaker = endpoint(eRender).map_err(err)?;
+    unsafe { speaker.SetMasterVolumeLevelScalar(level.clamp(0.0, 1.0), std::ptr::null()) }.map_err(err)
+}
+
+pub fn set_output_muted(muted: bool) -> Result<(), String> {
+    let speaker = endpoint(eRender).map_err(err)?;
+    unsafe { speaker.SetMute(muted, std::ptr::null()) }.map_err(err)
+}
+
+/// Mutes the microphone itself, for every app — not the privacy setting.
+pub fn set_mic_muted(muted: bool) -> Result<(), String> {
+    let mic = endpoint(eCapture).map_err(|_| "no microphone".to_string())?;
+    unsafe { mic.SetMute(muted, std::ptr::null()) }.map_err(err)
+}
+
+/// Flips the user's own location switch. The PC-wide one needs an administrator.
+pub fn set_location(on: bool) -> Result<(), String> {
+    let value: Vec<u16> = if on { "Allow" } else { "Deny" }.encode_utf16().chain([0]).collect();
+    let status = unsafe {
+        RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            LOCATION_KEY,
+            w!("Value"),
+            REG_SZ.0,
+            Some(value.as_ptr().cast()),
+            (value.len() * 2) as u32,
+        )
+    };
+    status.ok().map_err(err)
+}
+
+pub fn open_location_settings() {
+    open_url("ms-settings:privacy-location");
+}
+
+#[cfg(test)]
+mod system_tests {
+    use super::location_state;
+
+    #[test]
+    fn the_pc_wide_location_switch_wins() {
+        assert_eq!(location_state(Some("Allow"), Some("Allow")), "on");
+        assert_eq!(location_state(Some("Allow"), Some("Deny")), "off");
+        assert_eq!(location_state(Some("Deny"), Some("Allow")), "systemOff");
+        assert_eq!(location_state(None, Some("Allow")), "on");
+        assert_eq!(location_state(Some("Allow"), None), "off");
+    }
+
+    /// Flips each real control and puts it back. It touches this PC's sound and
+    /// location settings, so it only runs when asked:
+    /// `cargo test -p coucou -- --ignored --nocapture live_controls`
+    #[test]
+    #[ignore]
+    fn live_controls_round_trip() {
+        use super::*;
+        let before = system_status();
+        println!("media: {:?}", before.media.as_ref().map(|m| (&m.title, &m.artist, m.playing)));
+        println!("volume {:?} muted {} mic muted {:?} location {}", before.volume, before.muted, before.mic_muted, before.location);
+
+        if let Some(volume) = before.volume {
+            let other = if volume > 0.5 { volume - 0.1 } else { volume + 0.1 };
+            set_volume(other).unwrap();
+            assert!((system_status().volume.unwrap() - other).abs() < 0.02);
+            set_volume(volume).unwrap();
+            set_output_muted(!before.muted).unwrap();
+            assert_eq!(system_status().muted, !before.muted);
+            set_output_muted(before.muted).unwrap();
+        }
+        if let Some(mic) = before.mic_muted {
+            set_mic_muted(!mic).unwrap();
+            assert_eq!(system_status().mic_muted, Some(!mic));
+            set_mic_muted(mic).unwrap();
+        }
+        if before.location != "systemOff" {
+            let on = before.location == "on";
+            set_location(!on).unwrap();
+            assert_eq!(system_status().location, if on { "off" } else { "on" });
+            set_location(on).unwrap();
+        }
+        let after = system_status();
+        assert_eq!((after.muted, after.mic_muted, after.location), (before.muted, before.mic_muted, before.location));
+    }
+}

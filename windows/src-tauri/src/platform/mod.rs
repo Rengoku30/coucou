@@ -31,3 +31,29 @@ pub fn home_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
 }
+
+/// What the Controls view shows: the current media session, the default speaker
+/// and microphone, and the location switch.
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemStatus {
+    /// False on an OS where none of this is wired up.
+    pub supported: bool,
+    /// None when nothing is playing anywhere.
+    pub media: Option<MediaInfo>,
+    /// 0 to 1. None when there is no output device.
+    pub volume: Option<f32>,
+    pub muted: bool,
+    /// None when there is no microphone.
+    pub mic_muted: Option<bool>,
+    /// "on", "off", or "systemOff" when location is off for the whole PC.
+    pub location: &'static str,
+}
+
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaInfo {
+    pub title: String,
+    pub artist: String,
+    pub playing: bool,
+}
